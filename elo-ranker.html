@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Elo Ranking App</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #itemsInput {
+      width: 80%;
+      height: 200px;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+    .itemBox {
+      width: 40%;
+      height: 150px;
+      border: 2px solid #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 1.5rem;
+      cursor: pointer;
+      margin: 1%;
+      user-select: none;
+    }
+    .itemBox.selected {
+      background-color: #ffeb3b;
+    }
+    #compareContainer {
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+      width: 100%;
+    }
+    #progressContainer {
+      width: 80%;
+      height: 20px;
+      background: #eee;
+      margin: 20px auto;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    #progressBar {
+      width: 0%;
+      height: 100%;
+      background: #4caf50;
+    }
+    #resultsContainer table {
+      border-collapse: collapse;
+      width: 60%;
+      margin-top: 20px;
+    }
+    #resultsContainer th, #resultsContainer td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    #resultsContainer th {
+      background-color: #f2f2f2;
+    }
+    #completionText {
+      font-size: 1.2rem;
+      margin-top: 20px;
+      display: none;
+    }
+    #promptText {
+      font-size: 1.25rem;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="idleState">
+    <h1>Welcome to the Elo Ranking App</h1>
+    <p>Enter a list of items (one per line), or upload a CSV file. Optionally, include initial scores as "item, score". Click "Load Data" to begin ranking.</p>
+    <textarea id="itemsInput" placeholder="e.g.\npear\napple\nbanana\nor\npear, 1500\napple, 1450\n..."></textarea><br>
+    <input type="file" id="fileInput" accept=".csv"><br><br>
+    <button id="loadButton">Load Data</button>
+  </div>
+
+  <div id="rankingState" style="display: none; width: 100%;">
+    <p id="promptText">Which one would you prefer between...</p>
+    <div id="compareContainer">
+      <div id="leftItem" class="itemBox"></div>
+      <div id="rightItem" class="itemBox"></div>
+    </div>
+    <div id="progressContainer">
+      <div id="progressBar"></div>
+    </div>
+    <p id="completionText">You're done!</p>
+    <button id="viewResultsButton">View Results</button>
+    <button id="downloadResultsButton">Download Results</button>
+    <div id="resultsContainer"></div>
+  </div>
+
+  <script>
+    let items = [];
+    let pairs = [];
+    let currentPairIndex = 0;
+    let waiting = false;
+    const kFactor = 32;
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function parseInput() {
+      const text = document.getElementById('itemsInput').value.trim();
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      items = [];
+      lines.forEach(line => {
+        const parts = line.split(',');
+        if (parts.length === 2) {
+          const name = parts[0].trim();
+          const score = parseFloat(parts[1].trim());
+          if (!isNaN(score)) {
+            items.push({ name, score });
+          }
+        } else {
+          const name = line.trim();
+          items.push({ name, score: 1500 });
+        }
+      });
+    }
+
+    function generatePairs() {
+      pairs = [];
+      const n = items.length;
+      for (let i = 0; i < n - 1; i++) {
+        for (let j = i + 1; j < n; j++) {
+          pairs.push([i, j]);
+        }
+      }
+      shuffle(pairs);
+      currentPairIndex = 0;
+    }
+
+    function updateElo(winnerScore, loserScore) {
+      const expectedWinner = 1 / (1 + Math.pow(10, (loserScore - winnerScore) / 400));
+      const expectedLoser = 1 - expectedWinner;
+      const newWinner = winnerScore + kFactor * (1 - expectedWinner);
+      const newLoser = loserScore - kFactor * expectedLoser;
+      return [newWinner, newLoser];
+    }
+
+    function updateProgressBar() {
+      const percent = (currentPairIndex / pairs.length) * 100;
+      document.getElementById('progressBar').style.width = percent + '%';
+    }
+
+    function showNextPair() {
+      const compareContainer = document.getElementById('compareContainer');
+      const progressContainer = document.getElementById('progressContainer');
+      const completionText = document.getElementById('completionText');
+      const promptText = document.getElementById('promptText');
+      if (currentPairIndex >= pairs.length) {
+        compareContainer.style.display = 'none';
+        progressContainer.style.display = 'none';
+        promptText.style.display = 'none';
+        completionText.style.display = 'block';
+        showResults();
+        return;
+      }
+      promptText.style.display = 'block';
+      const [i, j] = pairs[currentPairIndex];
+      let leftIndex = i;
+      let rightIndex = j;
+      if (Math.random() < 0.5) {
+        leftIndex = j;
+        rightIndex = i;
+      }
+      const leftBox = document.getElementById('leftItem');
+      const rightBox = document.getElementById('rightItem');
+      leftBox.textContent = items[leftIndex].name;
+      rightBox.textContent = items[rightIndex].name;
+      leftBox.dataset.index = leftIndex;
+      rightBox.dataset.index = rightIndex;
+      leftBox.style.display = 'flex';
+      rightBox.style.display = 'flex';
+      updateProgressBar();
+    }
+
+    function handleSelection(side) {
+      if (waiting || currentPairIndex >= pairs.length) return;
+      waiting = true;
+      const leftBox = document.getElementById('leftItem');
+      const rightBox = document.getElementById('rightItem');
+      const leftIndex = parseInt(leftBox.dataset.index);
+      const rightIndex = parseInt(rightBox.dataset.index);
+      let winnerIndex, loserIndex, winnerBox;
+      if (side === 'left') {
+        winnerIndex = leftIndex;
+        loserIndex = rightIndex;
+        winnerBox = leftBox;
+      } else {
+        winnerIndex = rightIndex;
+        loserIndex = leftIndex;
+        winnerBox = rightBox;
+      }
+      const [newWinnerScore, newLoserScore] = updateElo(items[winnerIndex].score, items[loserIndex].score);
+      items[winnerIndex].score = newWinnerScore;
+      items[loserIndex].score = newLoserScore;
+
+      winnerBox.classList.add('selected');
+      setTimeout(() => {
+        winnerBox.classList.remove('selected');
+        currentPairIndex++;
+        showNextPair();
+        waiting = false;
+      }, 200);
+    }
+
+    function showResults() {
+      const container = document.getElementById('resultsContainer');
+      container.innerHTML = '';
+      const sortedItems = [...items].sort((a, b) => b.score - a.score);
+      const table = document.createElement('table');
+      const headerRow = document.createElement('tr');
+      const th1 = document.createElement('th'); th1.textContent = 'Item';
+      const th2 = document.createElement('th'); th2.textContent = 'Score';
+      headerRow.appendChild(th1);
+      headerRow.appendChild(th2);
+      table.appendChild(headerRow);
+      sortedItems.forEach(item => {
+        const row = document.createElement('tr');
+        const td1 = document.createElement('td'); td1.textContent = item.name;
+        const td2 = document.createElement('td'); td2.textContent = item.score.toFixed(2);
+        row.appendChild(td1);
+        row.appendChild(td2);
+        table.appendChild(row);
+      });
+      container.appendChild(table);
+    }
+
+    function downloadResults() {
+      const sortedItems = [...items].sort((a, b) => b.score - a.score);
+      let csvContent = 'Item,Score\n';
+      sortedItems.forEach(item => {
+        csvContent += `${item.name},${item.score.toFixed(2)}\n`;
+      });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'elo_ranking_results.csv');
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    window.onload = () => {
+      const fileInput = document.getElementById('fileInput');
+      const itemsInput = document.getElementById('itemsInput');
+      const loadButton = document.getElementById('loadButton');
+      const leftBox = document.getElementById('leftItem');
+      const rightBox = document.getElementById('rightItem');
+      const viewButton = document.getElementById('viewResultsButton');
+      const downloadButton = document.getElementById('downloadResultsButton');
+
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const result = evt.target.result;
+            const lines = result.split(/\r?\n/);
+            lines.shift(); // remove header row
+            itemsInput.value = lines.join('\n');
+          };
+          reader.readAsText(file);
+        }
+      });
+
+      loadButton.addEventListener('click', () => {
+        parseInput();
+        if (items.length < 2) {
+          alert('Please provide at least two items.');
+          return;
+        }
+        generatePairs();
+        document.getElementById('idleState').style.display = 'none';
+        document.getElementById('rankingState').style.display = 'block';
+        showNextPair();
+      });
+
+      leftBox.addEventListener('click', () => handleSelection('left'));
+      rightBox.addEventListener('click', () => handleSelection('right'));
+
+      window.addEventListener('keydown', (e) => {
+        if (document.getElementById('rankingState').style.display === 'block' && !waiting) {
+          if (e.key === 'f' || e.key === 'F') {
+            handleSelection('left');
+          } else if (e.key === 'j' || e.key === 'J') {
+            handleSelection('right');
+          }
+        }
+      });
+
+      viewButton.addEventListener('click', showResults);
+      downloadButton.addEventListener('click', downloadResults);
+    };
+  </script>
+</body>
+</html>
